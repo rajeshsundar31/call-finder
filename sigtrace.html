@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIGTRACE // DUAL CHANNEL INTERCEPT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg: #04070a;
+    --panel: #070d12;
+    --green: #39ff6a;
+    --green-dim: #1c8a3f;
+    --cyan: #17e0e0;
+    --red: #ff3b4a;
+    --amber: #ffb020;
+    --text: #c9f7d4;
+    --muted: #4f7a63;
+    --seam: #0d1a16;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Share Tech Mono', monospace;
+    overflow-x:hidden;
+    position:relative;
+    min-height:100vh;
+  }
+  canvas#rain{
+    position:fixed; inset:0; width:100%; height:100%;
+    opacity:0.16; z-index:0; pointer-events:none;
+  }
+  .scanlines{
+    position:fixed; inset:0; z-index:5; pointer-events:none;
+    background:repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.12) 3px
+    );
+    mix-blend-mode:multiply;
+  }
+  .vignette{
+    position:fixed; inset:0; z-index:4; pointer-events:none;
+    background:radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(0,0,0,0.65) 100%);
+  }
+
+  header{
+    position:relative; z-index:2;
+    text-align:center;
+    padding:34px 20px 18px;
+  }
+  .brand{
+    font-family:'JetBrains Mono', monospace;
+    font-weight:800;
+    font-size:clamp(24px, 5vw, 42px);
+    letter-spacing:6px;
+    color:var(--green);
+    text-shadow:0 0 6px rgba(57,255,106,0.55), 0 0 22px rgba(57,255,106,0.25);
+    margin:0;
+  }
+  .brand span{ color:var(--cyan); text-shadow:0 0 6px rgba(23,224,224,0.6); }
+  .subline{
+    margin-top:8px;
+    font-size:12px;
+    letter-spacing:3px;
+    color:var(--muted);
+    text-transform:uppercase;
+  }
+  .status-row{
+    display:flex; justify-content:center; gap:22px;
+    margin-top:14px; font-size:11px; letter-spacing:2px; color:var(--muted);
+    flex-wrap:wrap;
+  }
+  .dot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); margin-right:6px; animation:pulse 1.6s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+
+  main{
+    position:relative; z-index:2;
+    display:flex;
+    min-height:60vh;
+    margin:0 auto;
+    max-width:1180px;
+    padding:10px 18px 40px;
+    gap:0;
+  }
+  .panel{
+    flex:1;
+    background:linear-gradient(180deg, var(--panel), #050a0d 90%);
+    border:1px solid rgba(57,255,106,0.14);
+    padding:26px 24px 34px;
+    position:relative;
+    min-width:0;
+  }
+  .panel.left{ border-radius:10px 0 0 10px; border-right:none; }
+  .panel.right{ border-radius:0 10px 10px 0; border-left:none; }
+  .panel::before{
+    content:''; position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg, transparent, var(--green-dim), transparent);
+  }
+  .seam{
+    width:2px;
+    background:linear-gradient(180deg, transparent, var(--cyan), transparent);
+    box-shadow:0 0 14px rgba(23,224,224,0.65);
+    position:relative;
+    animation:seamPulse 2.4s ease-in-out infinite;
+  }
+  @keyframes seamPulse{ 0%,100%{ opacity:0.5; } 50%{ opacity:1; } }
+
+  .panel-tag{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    letter-spacing:3px;
+    color:var(--cyan);
+    text-transform:uppercase;
+    display:flex; align-items:center; gap:8px;
+    margin-bottom:6px;
+  }
+  .panel-tag::before{ content:'//'; color:var(--muted); }
+  .panel h2{
+    font-family:'JetBrains Mono', monospace;
+    font-size:19px;
+    letter-spacing:1px;
+    margin:0 0 18px;
+    color:var(--text);
+  }
+  .field-label{
+    font-size:11px; letter-spacing:2px; color:var(--muted);
+    text-transform:uppercase; margin-bottom:8px; display:block;
+  }
+  .input-wrap{
+    display:flex; align-items:center;
+    border:1px solid rgba(57,255,106,0.35);
+    background:#020403;
+    padding:0 12px;
+    border-radius:4px;
+    transition:border-color .2s, box-shadow .2s;
+  }
+  .input-wrap:focus-within{
+    border-color:var(--green);
+    box-shadow:0 0 0 2px rgba(57,255,106,0.15), 0 0 16px rgba(57,255,106,0.25);
+  }
+  .input-wrap .prompt{ color:var(--green-dim); margin-right:6px; user-select:none; }
+  .input-wrap input{
+    flex:1;
+    background:transparent;
+    border:none;
+    outline:none;
+    color:var(--green);
+    font-family:'Share Tech Mono', monospace;
+    font-size:16px;
+    letter-spacing:1px;
+    padding:13px 4px;
+  }
+  .input-wrap input::placeholder{ color:#2e5540; }
+  .field-error{
+    min-height:16px;
+    font-size:11px;
+    color:var(--red);
+    margin-top:8px;
+    letter-spacing:0.5px;
+  }
+  .panel-meta{
+    margin-top:26px;
+    font-size:11px;
+    color:var(--muted);
+    line-height:1.7;
+    border-top:1px dashed rgba(79,122,99,0.35);
+    padding-top:14px;
+  }
+  .panel-meta b{ color:var(--muted); }
+
+  .action-zone{
+    position:relative; z-index:3;
+    max-width:640px;
+    margin:-6px auto 46px;
+    padding:0 20px;
+    text-align:center;
+  }
+  .time-range{
+    display:flex;
+    gap:16px;
+    justify-content:center;
+    flex-wrap:wrap;
+    margin-bottom:6px;
+  }
+  .tr-field{ flex:1; min-width:200px; max-width:260px; text-align:left; }
+  .tr-field .input-wrap input{
+    font-size:13px;
+    color:var(--cyan);
+    letter-spacing:0.5px;
+  }
+  .tr-field .input-wrap{ border-color:rgba(23,224,224,0.3); }
+  .tr-field .input-wrap:focus-within{
+    border-color:var(--cyan);
+    box-shadow:0 0 0 2px rgba(23,224,224,0.15), 0 0 16px rgba(23,224,224,0.25);
+  }
+  #executeBtn{
+    font-family:'JetBrains Mono', monospace;
+    font-weight:800;
+    font-size:14px;
+    letter-spacing:4px;
+    color:#02110a;
+    background:linear-gradient(180deg, var(--green), #1fae4f);
+    border:none;
+    padding:16px 40px;
+    border-radius:6px;
+    cursor:pointer;
+    text-transform:uppercase;
+    box-shadow:0 0 22px rgba(57,255,106,0.45), inset 0 1px 0 rgba(255,255,255,0.3);
+    transition:transform .12s ease, box-shadow .2s ease;
+  }
+  #executeBtn:hover{ transform:translateY(-2px); box-shadow:0 0 30px rgba(57,255,106,0.65); }
+  #executeBtn:active{ transform:translateY(0); }
+  #executeBtn:disabled{ opacity:0.55; cursor:progress; }
+  .shake{ animation:shake .4s; }
+  @keyframes shake{
+    0%,100%{ transform:translateX(0); }
+    20%{ transform:translateX(-8px); }
+    40%{ transform:translateX(8px); }
+    60%{ transform:translateX(-5px); }
+    80%{ transform:translateX(5px); }
+  }
+  .global-error{
+    min-height:18px;
+    color:var(--red);
+    font-size:12px;
+    letter-spacing:1px;
+    margin-top:14px;
+  }
+
+  #consoleBox{
+    max-width:760px;
+    margin:0 auto 50px;
+    background:#020403;
+    border:1px solid rgba(57,255,106,0.25);
+    border-radius:8px;
+    padding:18px 20px;
+    min-height:64px;
+    font-size:12.5px;
+    line-height:1.9;
+    color:var(--green);
+    display:none;
+    box-shadow:0 0 30px rgba(0,0,0,0.5);
+  }
+  #consoleBox .line{ opacity:0; animation:fadeIn .25s forwards; white-space:pre-wrap; }
+  #consoleBox .ok{ color:var(--green); }
+  #consoleBox .info{ color:var(--cyan); }
+  #consoleBox .warn{ color:var(--amber); }
+  @keyframes fadeIn{ to{ opacity:1; } }
+  .cursor-blink{ display:inline-block; width:8px; height:14px; background:var(--green); vertical-align:middle; animation:blink 1s step-start infinite; }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  footer{
+    position:relative; z-index:2;
+    text-align:center;
+    font-size:10.5px;
+    letter-spacing:1.5px;
+    color:var(--muted);
+    padding:0 20px 30px;
+  }
+  footer b{ color:var(--amber); }
+
+  @media (max-width: 760px){
+    main{ flex-direction:column; padding:6px 14px 20px; }
+    .panel.left{ border-radius:10px 10px 0 0; border-right:1px solid rgba(57,255,106,0.14); border-bottom:none; }
+    .panel.right{ border-radius:0 0 10px 10px; border-left:1px solid rgba(57,255,106,0.14); }
+    .seam{ width:auto; height:2px; background:linear-gradient(90deg, transparent, var(--cyan), transparent); }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="rain"></canvas>
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<header>
+  <h1 class="brand">SIG<span>TRACE</span></h1>
+  <div class="subline">Dual-Channel Signal Correlation Terminal</div>
+  <div class="status-row">
+    <span><span class="dot"></span>LINK ACTIVE</span>
+    <span>ENCRYPTION: SIM-AES256</span>
+    <span>MODE: DEMO / SYNTHETIC DATA</span>
+  </div>
+</header>
+
+<main>
+  <section class="panel left">
+    <div class="panel-tag">Channel A</div>
+    <h2>Mobile Number Trace</h2>
+    <label class="field-label" for="mobileNum">Target Mobile Number</label>
+    <div class="input-wrap">
+      <span class="prompt">&gt;</span>
+      <input id="mobileNum" type="tel" placeholder="e.g. 98765 43210" autocomplete="off" inputmode="numeric">
+    </div>
+    <div class="field-error" id="mobileErr"></div>
+    <div class="panel-meta">
+      <div><b>Carrier lookup:</b> pending</div>
+      <div><b>Record window:</b> set below (From / To)</div>
+      <div><b>Output:</b> synthetic call log, sheet "Mobile_Number_Log"</div>
+    </div>
+  </section>
+
+  <div class="seam"></div>
+
+  <section class="panel right">
+    <div class="panel-tag">Channel B</div>
+    <h2>Phone Number Trace</h2>
+    <label class="field-label" for="phoneNum">Target Phone Number</label>
+    <div class="input-wrap">
+      <span class="prompt">&gt;</span>
+      <input id="phoneNum" type="tel" placeholder="e.g. 04424 556677" autocomplete="off" inputmode="numeric">
+    </div>
+    <div class="field-error" id="phoneErr"></div>
+    <div class="panel-meta">
+      <div><b>Carrier lookup:</b> pending</div>
+      <div><b>Record window:</b> set below (From / To)</div>
+      <div><b>Output:</b> synthetic call log, sheet "Phone_Number_Log"</div>
+    </div>
+  </section>
+</main>
+
+<div class="action-zone">
+  <div class="time-range">
+    <div class="tr-field">
+      <label class="field-label" for="fromTime">From</label>
+      <div class="input-wrap">
+        <span class="prompt">&gt;</span>
+        <input id="fromTime" type="datetime-local">
+      </div>
+    </div>
+    <div class="tr-field">
+      <label class="field-label" for="toTime">To</label>
+      <div class="input-wrap">
+        <span class="prompt">&gt;</span>
+        <input id="toTime" type="datetime-local">
+      </div>
+    </div>
+  </div>
+  <div class="field-error" id="rangeErr"></div>
+  <button id="executeBtn">▶ Execute Trace</button>
+  <div class="global-error" id="globalErr"></div>
+</div>
+
+<div id="consoleBox"></div>
+
+<footer>
+  ALL RECORDS ARE <b>RANDOMLY GENERATED</b> FOR DEMO PURPOSES · NO REAL CARRIER OR NETWORK IS ACCESSED · NO REAL DATA IS COLLECTED
+</footer>
+
+<script>
+/* ---------- background matrix rain ---------- */
+(function(){
+  const canvas = document.getElementById('rain');
+  const ctx = canvas.getContext('2d');
+  let w, h, cols, drops;
+  const chars = '01アイウエオカキクケコサシスセソタチツテト';
+  function resize(){
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+    cols = Math.floor(w / 16);
+    drops = new Array(cols).fill(0).map(()=>Math.random()*h/16);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  function draw(){
+    ctx.fillStyle = 'rgba(4,7,10,0.12)';
+    ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = '#39ff6a';
+    ctx.font = '14px monospace';
+    for(let i=0;i<cols;i++){
+      const text = chars[Math.floor(Math.random()*chars.length)];
+      ctx.fillText(text, i*16, drops[i]*16);
+      if(drops[i]*16 > h && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ---------- validation helpers ---------- */
+const mobileInput = document.getElementById('mobileNum');
+const phoneInput = document.getElementById('phoneNum');
+const mobileErr = document.getElementById('mobileErr');
+const phoneErr = document.getElementById('phoneErr');
+const globalErr = document.getElementById('globalErr');
+const btn = document.getElementById('executeBtn');
+const consoleBox = document.getElementById('consoleBox');
+const fromTimeInput = document.getElementById('fromTime');
+const toTimeInput = document.getElementById('toTime');
+const rangeErr = document.getElementById('rangeErr');
+
+function toLocalInputValue(d){
+  const pad = n => n.toString().padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+(function setDefaultRange(){
+  const now = new Date();
+  const past = new Date(now.getTime() - 30*24*60*60*1000);
+  toTimeInput.value = toLocalInputValue(now);
+  fromTimeInput.value = toLocalInputValue(past);
+})();
+
+function normalize(v){
+  return v.replace(/[^\d]/g, '');
+}
+
+function validate(){
+  let ok = true;
+  mobileErr.textContent = '';
+  phoneErr.textContent = '';
+  globalErr.textContent = '';
+  rangeErr.textContent = '';
+
+  const mRaw = mobileInput.value.trim();
+  const pRaw = phoneInput.value.trim();
+  const mDigits = normalize(mRaw);
+  const pDigits = normalize(pRaw);
+
+  if(!mRaw){
+    mobileErr.textContent = 'REQUIRED: enter a mobile number.';
+    ok = false;
+  } else if(mDigits.length < 7 || mDigits.length > 15){
+    mobileErr.textContent = 'INVALID: use 7–15 digits.';
+    ok = false;
+  }
+
+  if(!pRaw){
+    phoneErr.textContent = 'REQUIRED: enter a phone number.';
+    ok = false;
+  } else if(pDigits.length < 7 || pDigits.length > 15){
+    phoneErr.textContent = 'INVALID: use 7–15 digits.';
+    ok = false;
+  }
+
+  if(ok && mDigits === pDigits){
+    globalErr.textContent = 'CONFLICT: mobile number and phone number cannot be identical.';
+    mobileErr.textContent = 'Duplicate value detected.';
+    phoneErr.textContent = 'Duplicate value detected.';
+    ok = false;
+  }
+
+  let fromDate = null, toDate = null;
+  if(!fromTimeInput.value || !toTimeInput.value){
+    rangeErr.textContent = 'REQUIRED: select both From and To search time.';
+    ok = false;
+  } else {
+    fromDate = new Date(fromTimeInput.value);
+    toDate = new Date(toTimeInput.value);
+    if(fromDate.getTime() >= toDate.getTime()){
+      rangeErr.textContent = 'INVALID: "From" must be earlier than "To".';
+      ok = false;
+    }
+  }
+
+  return { ok, mDigits, pDigits, mRaw, pRaw, fromDate, toDate };
+}
+
+/* ---------- random call log generation ---------- */
+const CALL_TYPES = [
+  { type: 'Incoming', weight: 4 },
+  { type: 'Outgoing', weight: 4 },
+  { type: 'Missed',   weight: 2 }
+];
+const LOCATIONS = [
+  'Coimbatore', 'Annur', 'Puliyampatti', 'Sulur', 'Kangeyam Road, Annur',
+  'Karamadai', 'Sirumugai', 'Vadavalli', 'Saravanampatti', 'Peelamedu',
+  'Mettupalayam', 'Thondamuthur', 'Somayampalayam', 'Kinathukadavu',
+  'Periyanaickenpalayam', 'Kovaipudur', 'Anaikatti', 'Chettipalayam'
+];
+
+function pickWeighted(list){
+  const total = list.reduce((s,i)=>s+i.weight,0);
+  let r = Math.random()*total;
+  for(const item of list){
+    if(r < item.weight) return item.type;
+    r -= item.weight;
+  }
+  return list[0].type;
+}
+
+function randomInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+function randomFakeNumber(){
+  const parts = ['9','8','7','6'];
+  let n = parts[randomInt(0,parts.length-1)];
+  for(let i=0;i<9;i++) n += randomInt(0,9);
+  return n;
+}
+
+function randomDateInRange(fromDate, toDate){
+  const t = fromDate.getTime() + Math.random() * (toDate.getTime() - fromDate.getTime());
+  return new Date(t);
+}
+
+function formatDate(d){
+  return d.toISOString().slice(0,10);
+}
+function formatTime(d){
+  return d.toTimeString().slice(0,8);
+}
+function formatDuration(totalSec){
+  const m = Math.floor(totalSec/60).toString().padStart(2,'0');
+  const s = (totalSec%60).toString().padStart(2,'0');
+  return m+':'+s;
+}
+
+function generateCallLog(ownerNumber, ownerLabel, otherNumber, count, fromDate, toDate){
+  const rows = [];
+  // ~70% of calls are between the two traced numbers, ~30% are with other random contacts
+  const CROSS_CALL_RATIO = 0.7;
+  for(let i=0;i<count;i++){
+    const type = pickWeighted(CALL_TYPES);
+    const d = randomDateInRange(fromDate, toDate);
+    const duration = type === 'Missed' ? 0 : randomInt(5, 1800);
+    const isCrossCall = Math.random() < CROSS_CALL_RATIO;
+    const contactNumber = isCrossCall ? otherNumber : randomFakeNumber();
+    rows.push({
+      'Owner Number': ownerNumber,
+      'Owner Channel': ownerLabel,
+      'Date': formatDate(d),
+      'Time': formatTime(d),
+      'Call Type': type,
+      'Contact Number': contactNumber,
+      'Contact Relation': isCrossCall ? 'Traced Pair (Other Channel)' : 'Other Contact',
+      'Duration (mm:ss)': formatDuration(duration),
+      'Duration (sec)': duration,
+      'Cell Tower / Location': LOCATIONS[randomInt(0, LOCATIONS.length-1)],
+      'Signal Strength (dBm)': -1 * randomInt(60, 115)
+    });
+  }
+  rows.sort((a,b)=> (a.Date+a.Time > b.Date+b.Time ? -1 : 1));
+  return rows;
+}
+
+/* ---------- console log animation ---------- */
+function pushLine(text, cls, delay){
+  return new Promise(resolve=>{
+    setTimeout(()=>{
+      const div = document.createElement('div');
+      div.className = 'line ' + (cls||'');
+      div.textContent = text;
+      consoleBox.appendChild(div);
+      consoleBox.scrollTop = consoleBox.scrollHeight;
+      resolve();
+    }, delay);
+  });
+}
+
+async function runSequence(mDigits, pDigits){
+  consoleBox.style.display = 'block';
+  consoleBox.innerHTML = '';
+  const steps = [
+    ['Establishing simulated session...', 'info', 120],
+    ['Handshake OK. Generating synthetic subscriber profile A...', 'ok', 380],
+    ['Handshake OK. Generating synthetic subscriber profile B...', 'ok', 380],
+    ['Building randomized call detail records (Channel A)...', 'info', 420],
+    ['Building randomized call detail records (Channel B)...', 'info', 420],
+    ['Note: no real network, carrier, or subscriber was contacted.', 'warn', 350],
+    ['Compiling workbook (2 sheets)...', 'info', 380],
+    ['Export ready. Triggering download...', 'ok', 300]
+  ];
+  for(const [text, cls, delay] of steps){
+    await pushLine(text, cls, delay);
+  }
+}
+
+/* ---------- excel export ---------- */
+function exportToExcel(mobileRows, phoneRows, mDigits, pDigits, fromDate, toDate){
+  const wb = XLSX.utils.book_new();
+
+  const summary = [
+    { Field: 'Report Type', Value: 'Synthetic Dual-Channel Call Log (Demo)' },
+    { Field: 'Generated At', Value: new Date().toString() },
+    { Field: 'Search From', Value: fromDate.toString() },
+    { Field: 'Search To', Value: toDate.toString() },
+    { Field: 'Mobile Number (Channel A)', Value: mDigits },
+    { Field: 'Phone Number (Channel B)', Value: pDigits },
+    { Field: 'Mobile Records', Value: mobileRows.length },
+    { Field: 'Phone Records', Value: phoneRows.length },
+    { Field: 'Data Source', Value: 'Randomly generated — no real telecom data' }
+  ];
+  const wsSummary = XLSX.utils.json_to_sheet(summary);
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+  const wsMobile = XLSX.utils.json_to_sheet(mobileRows);
+  XLSX.utils.book_append_sheet(wb, wsMobile, 'Mobile_Number_Log');
+
+  const wsPhone = XLSX.utils.json_to_sheet(phoneRows);
+  XLSX.utils.book_append_sheet(wb, wsPhone, 'Phone_Number_Log');
+
+  const ts = new Date().toISOString().replace(/[:.]/g,'-');
+  XLSX.writeFile(wb, `SIGTRACE_CallLog_${ts}.xlsx`);
+}
+
+/* ---------- main handler ---------- */
+btn.addEventListener('click', async ()=>{
+  const { ok, mDigits, pDigits, fromDate, toDate } = validate();
+  if(!ok){
+    btn.classList.remove('shake');
+    void btn.offsetWidth;
+    btn.classList.add('shake');
+    return;
+  }
+
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = 'PROCESSING...';
+
+  await runSequence(mDigits, pDigits);
+
+  const mobileRows = generateCallLog(mDigits, 'Mobile (Channel A)', pDigits, randomInt(12, 18), fromDate, toDate);
+  const phoneRows = generateCallLog(pDigits, 'Phone (Channel B)', mDigits, randomInt(12, 18), fromDate, toDate);
+
+  exportToExcel(mobileRows, phoneRows, mDigits, pDigits, fromDate, toDate);
+
+  await pushLine(`Downloaded ${mobileRows.length + phoneRows.length} synthetic records.`, 'ok', 150);
+
+  btn.disabled = false;
+  btn.textContent = originalText;
+});
+
+[mobileInput, phoneInput].forEach(inp=>{
+  inp.addEventListener('input', ()=>{
+    mobileErr.textContent = '';
+    phoneErr.textContent = '';
+    globalErr.textContent = '';
+  });
+});
+[fromTimeInput, toTimeInput].forEach(inp=>{
+  inp.addEventListener('input', ()=>{
+    rangeErr.textContent = '';
+    globalErr.textContent = '';
+  });
+});
+</script>
+
+</body>
+</html>
